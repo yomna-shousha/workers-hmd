@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "workers-hmd",
+  "main": "src/server/routes.ts",
+  "compatibility_date": "2025-07-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["PlanStorage", "ReleaseHistory", "StageStorage"],
+      "tag": "v1",
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PLAN_STORAGE",
+        "class_name": "PlanStorage"
+      },
+      {
+        "name": "RELEASE_HISTORY",
+        "class_name": "ReleaseHistory"
+      },
+      {
+        "name": "STAGE_STORAGE",
+        "class_name": "StageStorage"
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "name": "release-workflow",
+      "binding": "RELEASE_WORKFLOW",
+      "class_name": "ReleaseWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": []
+  },
+  "assets": {
+    "directory": "./dist/client/",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+}

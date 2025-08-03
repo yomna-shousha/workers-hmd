@@ -1,0 +1,889 @@
+openapi: 3.0.3
+info:
+  title: Workers HMD API
+  description: API for managing Health Mediated Deployments for Cloudflare Workers
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: "https://workers-hmd.{cloudflare-workers-subdomain}.workers.dev/api"
+    variables:
+      cloudflare-workers-subdomain:
+        default: replace-me
+
+security:
+  - BasicAuth: []
+
+paths:
+  /plan:
+    post:
+      summary: Get deployment plan
+      description: Retrieve the current deployment plan with stages and SLOs
+      operationId: getPlan
+      tags:
+        - Plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudflareConnection"
+      responses:
+        200:
+          description: Plan retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        400:
+          description: Invalid connection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: Plan not found
+    put:
+      summary: Update deployment plan
+      description: Create or update the deployment plan configuration
+      operationId: updatePlan
+      tags:
+        - Plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - connection
+                - plan
+              properties:
+                connection:
+                  $ref: "#/components/schemas/CloudflareConnection"
+                plan:
+                  $ref: "#/components/schemas/Plan"
+      responses:
+        200:
+          description: Plan updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        400:
+          description: Plan is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /release:
+    post:
+      summary: List releases
+      description: Get a list of all releases including current and completed ones
+      operationId: listReleases
+      tags:
+        - Release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - connection
+              properties:
+                connection:
+                  $ref: "#/components/schemas/CloudflareConnection"
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 50
+                  description: Maximum number of releases to return (default 50, max 100)
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Number of releases to skip for pagination (default 0)
+                since:
+                  type: string
+                  format: date-time
+                  example: '2024-01-01T00:00:00Z'
+                  description: Filter releases created after this timestamp (ISO 8601 format)
+                until:
+                  type: string
+                  format: date-time
+                  example: '2024-12-31T23:59:59Z'
+                  description: Filter releases created before this timestamp (ISO 8601 format)
+                state:
+                  type: string
+                  enum: [not_started, running, done_successful, done_stopped_manually, done_failed_slo]
+                  description: Filter releases by state
+      responses:
+        200:
+          description: List of releases retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Release"
+        400:
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /release/create:
+    post:
+      summary: Create release
+      description: Create a new release. Only one release can be staged at a time
+      operationId: createRelease
+      tags:
+        - Release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - connectionId
+              properties:
+                connectionId:
+                  type: string
+                  description: Connection identifier
+                old_version:
+                  type: string
+                  description: Old version ID
+                new_version:
+                  type: string
+                  description: New version ID
+      responses:
+        200:
+          description: Release created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Release"
+        409:
+          description: A release is already staged
+        400:
+          description: Release cannot be created from the plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /release/active/get:
+    post:
+      summary: Get active release
+      description: Retrieve the active release, or null if no active release exists
+      operationId: getActiveRelease
+      tags:
+        - Release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudflareConnection"
+      responses:
+        200:
+          description: Success (returns active release or null)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Release"
+                  - type: "null"
+        400:
+          description: Invalid connection details or something is wrong with the active release
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /release/active:
+    post:
+      summary: Control active release execution
+      description: Start or stop the active release
+      operationId: controlActiveRelease
+      tags:
+        - Release
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+                  enum:
+                    - start
+                    - stop
+                  description: The command to execute on the active release
+                account_id:
+                  type: string
+                  description: Cloudflare Account ID
+                api_token:
+                  type: string
+                  description: Cloudflare API Token for authentication
+      responses:
+        200:
+          description: start or stop was successful
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Release started successfully"
+        400:
+          description: The provided command is not valid for the release in its current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: No active release found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: Delete active release
+      description: Delete the active release if it is in 'not_started' state
+      operationId: deleteActiveRelease
+      tags:
+        - Release
+      responses:
+        200:
+          description: Release deleted
+        400:
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: No active release found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        409:
+          description: Release has to be in a "not_started" state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /release/{releaseId}:
+    post:
+      summary: Get release details
+      description: Retrieve release state, plan record, and stage information
+      operationId: getRelease
+      tags:
+        - Release
+      parameters:
+        - $ref: "#/components/parameters/releaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudflareConnection"
+      responses:
+        200:
+          description: Release details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Release"
+        400:
+          description: Invalid connection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: Release not found
+  /stage/{stageId}:
+    get:
+      summary: Get stage status
+      description: Get the current state of a specific stage
+      operationId: getStage
+      tags:
+        - Stage
+      parameters:
+        - $ref: "#/components/parameters/stageId"
+      responses:
+        200:
+          description: Returns the Stage info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseStage"
+        404:
+          description: Stage not found
+    post:
+      summary: Progress stage
+      description: Advance a stage by approving or denying it
+      operationId: progressStage
+      tags:
+        - Stage
+      parameters:
+        - $ref: "#/components/parameters/stageId"
+      requestBody:
+        required: true
+        content:
+          application/text:
+            schema:
+              type: string
+              enum:
+                - approve
+                - deny
+      responses:
+        200:
+          description: Successfully progressed the stage
+        400:
+          description: Invalid command
+        404:
+          description: Stage not found
+  /worker/versions:
+    post:
+      summary: Get worker versions
+      description: Proxy request to fetch worker versions from Cloudflare API
+      operationId: getWorkerVersions
+      tags:
+        - Worker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - worker_name
+                - account_id
+                - api_token
+              properties:
+                worker_name:
+                  type: string
+                  description: Name of the Cloudflare Worker
+                account_id:
+                  type: string
+                  description: Cloudflare Account ID
+                api_token:
+                  type: string
+                  description: Cloudflare API Token for authentication
+      responses:
+        200:
+          description: Worker versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerVersion"
+        400:
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        401:
+          description: Invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        403:
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /worker/deployments:
+    post:
+      summary: Get worker deployments
+      description: Proxy request to fetch worker deployments from Cloudflare API
+      operationId: getWorkerDeployments
+      tags:
+        - Worker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - worker_name
+                - account_id
+                - api_token
+              properties:
+                worker_name:
+                  type: string
+                  description: Name of the Cloudflare Worker
+                account_id:
+                  type: string
+                  description: Cloudflare Account ID
+                api_token:
+                  type: string
+                  description: Cloudflare API Token for authentication
+      responses:
+        200:
+          description: Worker deployments retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerDeployment"
+        400:
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        401:
+          description: Invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        403:
+          description: Access denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        404:
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+  parameters:
+    stageId:
+      name: stageId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-fA-F]{8}$'
+        example: '0fcdec2eb49045cc8b481c15e0f1277c'
+    releaseId:
+      name: releaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-fA-F]{8}$'
+        example: '0fcdec2eb49045cc8b481c15e0f1277c'
+
+  schemas:
+    CloudflareConnection:
+      type: object
+      description: Cloudflare account and worker connection details required for API authentication
+      required:
+        - accountId
+        - workerName
+        - apiToken
+      properties:
+        accountId:
+          type: string
+          description: Cloudflare account ID
+          example: "f855e2dd8145bf97126b4cdd08464a5e"
+        workerName:
+          type: string
+          description: Cloudflare Worker name
+          example: "my-worker"
+        apiToken:
+          type: string
+          description: Cloudflare API token for authentication
+          example: "vG9vYJ1_cPOzA1JyjDWdaL5X26bFUKNfnmXLA200"
+    ConnectionIdRequest:
+      type: object
+      description: Connection Id unique per Worker connection
+      required:
+        - connectionId
+      properties:
+        connectionId:
+          type: string
+          description: Combined connection identifier in format accountId-workerName-hashedApiToken
+          example: "f855e2dd8145bf97126b4cdd08464a5e-my-worker-a1b2c3d4"
+    PlanStage:
+      type: object
+      example:
+        order: 0
+        description: ""
+        target_percent: 25
+        soak_time: 10
+        auto_progress: true
+      required:
+        - order
+        - target_percent
+        - soak_time
+        - auto_progress
+      properties:
+        order:
+          description: order of the stage in the plan
+          type: integer
+        description:
+          type: string
+        target_percent:
+          description: target percentage of traffic that goes to the new Worker version
+          type: integer
+        soak_time:
+          description: soak time in seconds
+          type: integer
+          minimum: 10
+        auto_progress:
+          description: whether the stage automatically progresses or if it needs a human to manually progress it
+          type: boolean
+    ReleaseStage:
+      type: object
+      readOnly: true
+      example:
+        id: "release-1a2b3c4d-order-2"
+        order: 2
+        releaseId: "1a2b3c4d"
+        state: "queued"
+        time_started: "2023-01-01T00:00:00Z"
+        time_elapsed: 0
+        time_done: "2023-01-01T00:00:00Z"
+        logs: ""
+      required:
+        - id
+        - order
+        - releaseId
+        - state
+        - time_started
+        - time_elapsed
+        - time_done
+        - logs
+      properties:
+        id:
+          type: string
+        order:
+          description: order of the stage in the release
+          type: integer
+        releaseId:
+          description: id of the release
+          type: string
+        state:
+          description: state of the stage
+          type: string
+          enum:
+            - queued
+            - awaiting_approval
+            - running
+            - done_failed
+            - done_successful
+            - done_cancelled
+            - error
+        time_started:
+          type: string
+          format: date-time
+        time_elapsed:
+          type: integer
+        time_done:
+          type: string
+          format: date-time
+        logs:
+          type: string
+    Release:
+      type: object
+      readOnly: true
+      example:
+        id: "b2a2c3d4e5f6a1b2d3d5e5f6a1b2c3d5"
+        state: "not_started"
+        plan_record:
+          $ref: "#/components/schemas/Plan"
+        old_version: "fa2c3d4e5a6a1b2d3d5e5f6a1b2c3d5"
+        new_version: "e1a2c3d4e5f6a1b2d3d5e5f6a1b2c3d5"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageRef"
+        time_started:
+          type: string
+          format: date-time
+        time_elapsed:
+          type: integer
+        time_done:
+          type: string
+          format: date-time
+      required:
+        - id
+        - state
+        - plan_record
+        - stages
+        - old_version
+        - new_version
+        - time_created
+        - time_started
+        - time_elapsed
+        - time_done
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - not_started
+            - running
+            - done_stopped_manually
+            - done_failed_slo
+            - done_successful
+            - error
+        plan_record:
+          $ref: "#/components/schemas/Plan"
+        old_version:
+          type: string
+        new_version:
+          type: string
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageRef"
+        time_created:
+          type: string
+          format: date-time
+        time_started:
+          type: string
+          format: date-time
+        time_elapsed:
+          type: integer
+        time_done:
+          type: string
+          format: date-time
+    StageRef:
+      type: object
+      readOnly: true
+      required:
+        - id
+        - order
+      properties:
+        id:
+          type: string
+        order:
+          type: integer
+    Plan:
+      type: object
+      example:
+        stages:
+          - $ref: "#/components/schemas/PlanStage"
+        slos:
+          - $ref: "#/components/schemas/SLO"
+        worker_name: "my-worker"
+      required:
+        - stages
+        - slos
+        - worker_name
+        - polling_fraction
+      properties:
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanStage"
+        slos:
+          type: array
+          items:
+            $ref: "#/components/schemas/SLO"
+        polling_fraction:
+          type: number
+          minimum: 0.1
+          maximum: 1.0
+          description: Fraction of soak time to use for SLO polling rate (0.1 = 1/10, 1.0 = full time)
+          example: 0.5
+        time_last_saved:
+          type: string
+          format: date-time
+          readOnly: true
+        worker_name:
+          type: string
+    SLO:
+      type: object
+      description: Service Level Objective configuration
+      example:
+        percentile: "p99"
+        latency_ms: 100
+      required:
+        - percentile
+        - latency_ms
+      properties:
+        percentile:
+          type: string
+          enum: ["p999", "p99", "p90", "median"]
+          description: Latency percentile to monitor
+        latency_ms:
+          type: integer
+          minimum: 1
+          maximum: 60000
+          description: Maximum allowed latency in milliseconds
+    WorkerVersion:
+      type: object
+      description: Cloudflare Worker version information
+      required:
+        - id
+        - number
+      properties:
+        id:
+          type: string
+          description: Unique version identifier/hash
+          example: "25d3aa76-e335-4001-87a9-43a6be83f294"
+        number:
+          type: integer
+          description: Version number
+          example: 24
+        metadata:
+          type: object
+          description: Version metadata including creation info
+          properties:
+            created_on:
+              type: string
+              format: date-time
+              description: Timestamp when version was created
+              example: "2025-06-27T21:18:29.265546Z"
+            source:
+              type: string
+              example: "api"
+            author_id:
+              type: string
+            author_email:
+              type: string
+            has_preview:
+              type: boolean
+          additionalProperties: true
+        annotations:
+          type: object
+          description: Additional annotations
+          additionalProperties: true
+    WorkerDeployment:
+      type: object
+      description: Cloudflare Worker deployment information
+      required:
+        - id
+        - versions
+      properties:
+        id:
+          type: string
+          description: Unique deployment identifier
+          example: "01234567-89ab-cdef-0123-456789abcdef"
+        versions:
+          type: array
+          description: Versions included in this deployment with their traffic percentages
+          items:
+            type: object
+            required:
+              - version_id
+              - percentage
+            properties:
+              version_id:
+                type: string
+                description: Version identifier
+                example: "25d3aa76-e335-4001-87a9-43a6be83f294"
+              percentage:
+                type: number
+                description: Traffic percentage for this version (0-100)
+                example: 100
+        source:
+          type: string
+          description: Deployment source (e.g., api, dash)
+          example: "api"
+        strategy:
+          type: string
+          description: Deployment strategy
+          example: "percentage"
+        author_email:
+          type: string
+          description: Email of deployment author
+        created_on:
+          type: string
+          format: date-time
+          description: Timestamp when deployment was created
+          example: "2025-06-27T21:18:29.265546Z"
+        annotations:
+          type: object
+          description: Additional deployment annotations
+          additionalProperties: true
+    Error:
+      type: object
+      description: Standard error response format
+      example:
+        message: "Invalid request"
+        ok: false
+      required:
+        - message
+        - ok
+      properties:
+        message:
+          type: string
+          description: Error message describing what went wrong
+        ok:
+          type: boolean
+          description: Always false for error responses
+          enum: [false]
